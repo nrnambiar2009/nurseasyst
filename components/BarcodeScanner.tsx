@@ -90,10 +90,15 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
 
           canvas.width = v.videoWidth;
           canvas.height = v.videoHeight;
-          ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          log(`Canvas: ${canvas.width}x${canvas.height}`);
 
           try {
+            const bitmap = await createImageBitmap(v);
+            ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+            bitmap.close();
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            log(`ImageData pixels: ${imageData.data.length}`);
+
             const symbols = await scanImageData(imageData);
             log(`Symbols: ${symbols.length}`);
             for (const symbol of symbols) {
@@ -154,6 +159,8 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
           ref={videoRef}
           muted
           playsInline
+          autoPlay
+          crossOrigin="anonymous"
           className="h-full w-full object-cover"
           style={{ transform: "scaleX(-1)" }}
         />
