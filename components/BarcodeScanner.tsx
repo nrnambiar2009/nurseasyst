@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/browser";
-import type { Result } from "@zxing/library";
+import { BrowserDatamatrixCodeReader, BrowserMultiFormatReader } from "@zxing/browser";
+import { BarcodeFormat, DecodeHintType, type Result } from "@zxing/library";
 import { parseGS1DataMatrix, type GS1Parsed } from "@/lib/gs1-parser";
 
 export interface BarcodeScannerProps {
@@ -15,7 +15,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
   const [status, setStatus] = useState<"idle" | "requesting" | "scanning" | "denied" | "error">("idle");
   const [torchOn, setTorchOn] = useState(false);
   const [hasStream, setHasStream] = useState(false);
-  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
+  const readerRef = useRef<BrowserMultiFormatReader | BrowserDatamatrixCodeReader | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastResultRef = useRef<string | null>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
@@ -52,13 +52,33 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
     const video = videoRef.current;
     if (!video) return;
 
-    const reader = new BrowserMultiFormatReader();
+    let reader: BrowserMultiFormatReader | BrowserDatamatrixCodeReader;
+    try {
+      // Prefer a dedicated DataMatrix reader for GS1 pharmaceutical codes
+      reader = new BrowserDatamatrixCodeReader();
+    } catch {
+      // Fallback: multi-format reader with strong DataMatrix hints
+      const hints = new Map();
+      const formats = [BarcodeFormat.DATA_MATRIX];
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      reader = new BrowserMultiFormatReader(hints);
+    }
     readerRef.current = reader;
 
     setStatus("requesting");
 
     reader
-      .decodeFromVideoDevice(undefined, video, (result: Result | undefined, err: Error | undefined) => {
+      .decodeFromConstraints(
+        {
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        },
+        video,
+        (result: Result | undefined, err: Error | undefined) => {
         if (err || !result) return;
         const text = result.getText();
         if (lastResultRef.current === text) return;
@@ -68,7 +88,9 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
           onResult(parsed);
           lastResultRef.current = null;
         }
-      })
+        },
+        200,
+      )
       .then((controls) => {
         controlsRef.current = controls;
         if (video.srcObject instanceof MediaStream) {
