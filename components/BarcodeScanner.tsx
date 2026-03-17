@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { scanImageData, ZBarSymbolType } from "@undecaf/zbar-wasm";
+import { scanImageData } from "@undecaf/zbar-wasm";
 import { parseGS1DataMatrix, type GS1Parsed } from "@/lib/gs1-parser";
 
 export interface BarcodeScannerProps {
@@ -87,8 +87,8 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
           try {
             const symbols = await scanImageData(imageData);
             for (const symbol of symbols) {
-              if (symbol.type !== ZBarSymbolType.ZBAR_QRCODE && symbol.type !== ZBarSymbolType.ZBAR_DATAMATRIX) continue;
               const text = symbol.decode();
+              if (!text) continue;
               if (!text || lastResultRef.current === text) continue;
               lastResultRef.current = text;
               const parsed = parseGS1DataMatrix(text);
