@@ -58,7 +58,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
     setStatus("requesting");
 
     reader
-      .decodeFromVideoDevice(undefined, video, (result: Result | null, err: Error | null) => {
+      .decodeFromVideoDevice(undefined, video, (result: Result | undefined, err: Error | undefined) => {
         if (err || !result) return;
         const text = result.getText();
         if (lastResultRef.current === text) return;
