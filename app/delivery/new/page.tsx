@@ -5,12 +5,36 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BarcodeScanner } from "@/components/BarcodeScanner";
 import type { GS1Parsed } from "@/lib/gs1-parser";
-import { lookupProductName, productNameToType } from "@/lib/product-lookup";
+import { lookupProductName } from "@/lib/product-lookup";
 import { formatExpiryDisplay } from "@/lib/types";
 import { expiryToISODate } from "@/lib/expiry-format";
 import { supabase } from "@/lib/supabase";
 
 const TEST_SCHOOL_ID = "00000000-0000-0000-0000-000000000001";
+
+function getProductType(productName: string): string {
+  const name = productName.toLowerCase();
+  if (name.includes("epinephrine") || name.includes("epipen") || name.includes("auvi") || name.includes("adrenalin"))
+    return "epipen";
+  if (
+    name.includes("albuterol") ||
+    name.includes("salbutamol") ||
+    name.includes("proventil") ||
+    name.includes("ventolin")
+  )
+    return "albuterol";
+  if (name.includes("naloxone") || name.includes("narcan") || name.includes("kloxxado") || name.includes("zimhi"))
+    return "naloxone";
+  if (name.includes("glucagon") || name.includes("gvoke") || name.includes("baqsimi")) return "glucagon";
+  if (
+    name.includes("aed") ||
+    name.includes("defibrillator") ||
+    name.includes("electrode") ||
+    name.includes("pad")
+  )
+    return "aed_pads";
+  return "albuterol"; // default fallback
+}
 
 type Screen = "form" | "success";
 
@@ -43,7 +67,7 @@ export default function NewDeliveryPage() {
     const expiryISO = expiryToISODate(expiryDate);
     const { error } = await supabase.from("inventory_items").insert({
       school_id: TEST_SCHOOL_ID,
-      product_type: productNameToType(productName),
+      product_type: getProductType(productName),
       product_name: productName,
       gtin,
       lot_number: lotNumber,
