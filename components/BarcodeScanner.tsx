@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BrowserDatamatrixCodeReader, BrowserMultiFormatReader } from "@zxing/browser";
-import { BarcodeFormat, DecodeHintType, type Result } from "@zxing/library";
+import { scanImageData } from "@undecaf/zbar-wasm";
 import { parseGS1DataMatrix, type GS1Parsed } from "@/lib/gs1-parser";
 
 export interface BarcodeScannerProps {
@@ -12,18 +11,18 @@ export interface BarcodeScannerProps {
 
 export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [status, setStatus] = useState<"idle" | "requesting" | "scanning" | "denied" | "error">("idle");
   const [torchOn, setTorchOn] = useState(false);
   const [hasStream, setHasStream] = useState(false);
-  const readerRef = useRef<BrowserMultiFormatReader | BrowserDatamatrixCodeReader | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastResultRef = useRef<string | null>(null);
-  const controlsRef = useRef<{ stop: () => void } | null>(null);
+  const scanTimerRef = useRef<number | null>(null);
 
   const stopScanning = useCallback(() => {
-    if (controlsRef.current) {
-      controlsRef.current.stop();
-      controlsRef.current = null;
+    if (scanTimerRef.current !== null) {
+      window.clearInterval(scanTimerRef.current);
+      scanTimerRef.current = null;
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -52,53 +51,58 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
     const video = videoRef.current;
     if (!video) return;
 
-    let reader: BrowserMultiFormatReader | BrowserDatamatrixCodeReader;
-    try {
-      // Prefer a dedicated DataMatrix reader for GS1 pharmaceutical codes
-      reader = new BrowserDatamatrixCodeReader();
-    } catch {
-      // Fallback: multi-format reader with strong DataMatrix hints
-      const hints = new Map();
-      const formats = [BarcodeFormat.DATA_MATRIX];
-      hints.set(DecodeHintType.POSSIBLE_FORMATS, formats);
-      hints.set(DecodeHintType.TRY_HARDER, true);
-      reader = new BrowserMultiFormatReader(hints);
-    }
-    // Scan ~5 times per second
-    (reader as any).timeBetweenScansMillis = 200;
-    readerRef.current = reader;
-
     setStatus("requesting");
 
-    reader
-      .decodeFromConstraints(
-        {
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
+    navigator.mediaDevices
+      .getUserMedia({
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
         },
-        video,
-        (result: Result | undefined, err: Error | undefined) => {
-          if (err || !result) return;
-          const text = result.getText();
-          if (lastResultRef.current === text) return;
-          lastResultRef.current = text;
-          const parsed = parseGS1DataMatrix(text);
-          if (parsed) {
-            onResult(parsed);
-            lastResultRef.current = null;
-          }
-        },
-      )
-      .then((controls) => {
-        controlsRef.current = controls;
-        if (video.srcObject instanceof MediaStream) {
-          streamRef.current = video.srcObject;
-          setHasStream(true);
-        }
+      })
+      .then((stream) => {
+        streamRef.current = stream;
+        video.srcObject = stream;
+        return video.play();
+      })
+      .then(() => {
+        setHasStream(true);
         setStatus("scanning");
+
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        const scan = async () => {
+          const v = videoRef.current;
+          if (!v || v.readyState < 2) return;
+
+          canvas.width = v.videoWidth;
+          canvas.height = v.videoHeight;
+          ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+          try {
+            const symbols = await scanImageData(imageData);
+            for (const symbol of symbols) {
+              if (symbol.type !== "QR-Code" && symbol.type !== "DataMatrix") continue;
+              const text = symbol.decode();
+              if (!text || lastResultRef.current === text) continue;
+              lastResultRef.current = text;
+              const parsed = parseGS1DataMatrix(text);
+              if (parsed) {
+                onResult(parsed);
+                lastResultRef.current = null;
+              }
+            }
+          } catch {
+            // ignore transient decode errors
+          }
+        };
+
+        scanTimerRef.current = window.setInterval(scan, 300);
       })
       .catch((err: Error) => {
         if (err.name === "NotAllowedError" || err.message?.toLowerCase().includes("permission")) {
@@ -110,7 +114,6 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
 
     return () => {
       stopScanning();
-      readerRef.current = null;
     };
   }, [onResult, stopScanning]);
 
@@ -141,6 +144,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
         className="h-full w-full object-cover"
         style={{ transform: "scaleX(-1)" }}
       />
+      <canvas ref={canvasRef} style={{ display: "none" }} />
       {(status === "requesting" || status === "scanning") && (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40">
           <span className="rounded-full bg-black/70 px-4 py-2 text-sm font-medium text-white">
