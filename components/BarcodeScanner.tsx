@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { scanImageData } from "@undecaf/zbar-wasm";
+import { BarcodeReader } from "dynamsoft-barcode-reader";
 import { parseGS1DataMatrix, type GS1Parsed } from "@/lib/gs1-parser";
 
 export interface BarcodeScannerProps {
@@ -11,7 +11,6 @@ export interface BarcodeScannerProps {
 
 export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [status, setStatus] = useState<"idle" | "requesting" | "scanning" | "denied" | "error">("idle");
   const [torchOn, setTorchOn] = useState(false);
   const [hasStream, setHasStream] = useState(false);
@@ -60,74 +59,67 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
 
     setStatus("requesting");
 
-    navigator.mediaDevices
-      .getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
-      })
-      .then((stream) => {
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+          },
+        });
         streamRef.current = stream;
         video.srcObject = stream;
-        return video.play();
-      })
-      .then(() => {
+        await video.play();
         log("Camera started");
         setHasStream(true);
         setStatus("scanning");
 
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
+        log("Initializing Dynamsoft reader...");
+        const reader = await BarcodeReader.createInstance();
+        await reader.updateRuntimeSettings("speed");
+        const settings = await reader.getRuntimeSettings();
+        settings.barcodeFormatIds = 0x8000000; // DataMatrix only
+        settings.barcodeFormatIds2 = 0;
+        await reader.updateRuntimeSettings(settings);
+        log("Dynamsoft reader ready");
 
         const scan = async () => {
           log("Scanning frame...");
-          const v = videoRef.current;
-          if (!v || v.readyState < 2) return;
-
-          canvas.width = v.videoWidth;
-          canvas.height = v.videoHeight;
-          log(`Canvas: ${canvas.width}x${canvas.height}`);
-
+          if (!videoRef.current) return;
           try {
-            const bitmap = await createImageBitmap(v);
-            ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-            bitmap.close();
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            log(`ImageData pixels: ${imageData.data.length}`);
-
-            const symbols = await scanImageData(imageData);
-            log(`Symbols: ${symbols.length}`);
-            for (const symbol of symbols) {
-              const text = symbol.decode();
+            const results = await reader.decode(videoRef.current);
+            log(`Results: ${results.length}`);
+            for (const result of results) {
+              const text = result.barcodeText;
               if (!text) continue;
-              if (!text || lastResultRef.current === text) continue;
-              lastResultRef.current = text;
-              const parsed = parseGS1DataMatrix(text);
-              if (parsed) {
-                onResult(parsed);
-                lastResultRef.current = null;
+              log(`Found: ${text.substring(0, 20)}`);
+              if (text && text !== lastResultRef.current) {
+                lastResultRef.current = text;
+                const parsed = parseGS1DataMatrix(text);
+                if (parsed) {
+                  onResult(parsed);
+                  lastResultRef.current = null;
+                  break;
+                }
               }
             }
           } catch (err: any) {
             log(`Scan error: ${err?.message || String(err)}`);
-            // ignore transient decode errors
           }
         };
 
-        scanTimerRef.current = window.setInterval(scan, 300);
-      })
-      .catch((err: Error) => {
-        log(`WASM / camera ERROR: ${err.message}`);
-        if (err.name === "NotAllowedError" || err.message?.toLowerCase().includes("permission")) {
+        scanTimerRef.current = window.setInterval(scan, 500);
+      } catch (err: any) {
+        log(`Dynamsoft / camera ERROR: ${err?.message || String(err)}`);
+        const e = err as Error;
+        if (e.name === "NotAllowedError" || e.message?.toLowerCase().includes("permission")) {
           setStatus("denied");
         } else {
           setStatus("error");
         }
-      });
+      }
+    })();
 
     return () => {
       stopScanning();
