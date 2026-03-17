@@ -65,7 +65,6 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
       reader = new BrowserMultiFormatReader(hints);
     }
     // Scan ~5 times per second
-    // @ts-expect-error timeBetweenScansMillis is available at runtime but not typed in our version
     (reader as any).timeBetweenScansMillis = 200;
     readerRef.current = reader;
 
