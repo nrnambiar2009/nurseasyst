@@ -15,9 +15,14 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
   const [status, setStatus] = useState<"idle" | "requesting" | "scanning" | "denied" | "error">("idle");
   const [torchOn, setTorchOn] = useState(false);
   const [hasStream, setHasStream] = useState(false);
+  const [debugLog, setDebugLog] = useState<string[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const lastResultRef = useRef<string | null>(null);
   const scanTimerRef = useRef<number | null>(null);
+
+  const log = useCallback((msg: string) => {
+    setDebugLog((prev) => [...prev.slice(-4), msg]);
+  }, []);
 
   const stopScanning = useCallback(() => {
     if (scanTimerRef.current !== null) {
@@ -48,6 +53,8 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
   }, [torchOn]);
 
   useEffect(() => {
+    log("Scanner mounted");
+
     const video = videoRef.current;
     if (!video) return;
 
@@ -67,6 +74,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
         return video.play();
       })
       .then(() => {
+        log("Camera started");
         setHasStream(true);
         setStatus("scanning");
 
@@ -76,6 +84,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
         if (!ctx) return;
 
         const scan = async () => {
+          log("Scanning frame...");
           const v = videoRef.current;
           if (!v || v.readyState < 2) return;
 
@@ -86,6 +95,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
 
           try {
             const symbols = await scanImageData(imageData);
+            log(`Symbols: ${symbols.length}`);
             for (const symbol of symbols) {
               const text = symbol.decode();
               if (!text) continue;
@@ -97,7 +107,8 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
                 lastResultRef.current = null;
               }
             }
-          } catch {
+          } catch (err: any) {
+            log(`Scan error: ${err?.message || String(err)}`);
             // ignore transient decode errors
           }
         };
@@ -105,6 +116,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
         scanTimerRef.current = window.setInterval(scan, 300);
       })
       .catch((err: Error) => {
+        log(`WASM / camera ERROR: ${err.message}`);
         if (err.name === "NotAllowedError" || err.message?.toLowerCase().includes("permission")) {
           setStatus("denied");
         } else {
@@ -136,32 +148,49 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
   }
 
   return (
-    <div className={`relative overflow-hidden rounded-xl bg-black ${className}`}>
-      <video
-        ref={videoRef}
-        muted
-        playsInline
-        className="h-full w-full object-cover"
-        style={{ transform: "scaleX(-1)" }}
-      />
-      <canvas ref={canvasRef} style={{ display: "none" }} />
-      {(status === "requesting" || status === "scanning") && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-          <span className="rounded-full bg-black/70 px-4 py-2 text-sm font-medium text-white">
-            {status === "requesting" ? "Starting camera…" : "Scanning…"}
-          </span>
-        </div>
-      )}
-      {hasStream && (
-        <button
-          type="button"
-          onClick={toggleTorch}
-          className="absolute bottom-4 right-4 rounded-lg bg-white/90 px-3 py-2 text-sm font-medium text-black shadow hover:bg-white"
-          aria-label={torchOn ? "Turn off flash" : "Turn on flash"}
-        >
-          {torchOn ? "Flash on" : "Flash off"}
-        </button>
-      )}
-    </div>
+    <>
+      <div className={`relative overflow-hidden rounded-xl bg-black ${className}`}>
+        <video
+          ref={videoRef}
+          muted
+          playsInline
+          className="h-full w-full object-cover"
+          style={{ transform: "scaleX(-1)" }}
+        />
+        <canvas ref={canvasRef} style={{ display: "none" }} />
+        {(status === "requesting" || status === "scanning") && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+            <span className="rounded-full bg-black/70 px-4 py-2 text-sm font-medium text-white">
+              {status === "requesting" ? "Starting camera…" : "Scanning…"}
+            </span>
+          </div>
+        )}
+        {hasStream && (
+          <button
+            type="button"
+            onClick={toggleTorch}
+            className="absolute bottom-4 right-4 rounded-lg bg-white/90 px-3 py-2 text-sm font-medium text-black shadow hover:bg-white"
+            aria-label={torchOn ? "Turn off flash" : "Turn on flash"}
+          >
+            {torchOn ? "Flash on" : "Flash off"}
+          </button>
+        )}
+      </div>
+      <div
+        style={{
+          background: "#000",
+          color: "#0f0",
+          padding: "8px",
+          fontSize: "11px",
+          fontFamily: "monospace",
+          borderRadius: "8px",
+          marginTop: "8px",
+        }}
+      >
+        {debugLog.map((line, i) => (
+          <div key={i}>{line}</div>
+        ))}
+      </div>
+    </>
   );
 }
