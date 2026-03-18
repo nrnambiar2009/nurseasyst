@@ -6,42 +6,37 @@ export async function POST(request: NextRequest) {
     const file = formData.get('image') as File;
     if (!file) return NextResponse.json({ error: 'No image' }, { status: 400 });
 
-    const bytes = await file.arrayBuffer();
-    const base64 = Buffer.from(bytes).toString('base64');
-    const mimeType = file.type || 'image/jpeg';
-    const dataUrl = `data:${mimeType};base64,${base64}`;
+    const inliteForm = new FormData();
+    inliteForm.append('file[]', file, file.name || 'scan.jpg');
 
     const inliteResponse = await fetch(
-      'https://wabr.inliteresearch.com/barcode-reader/api/decode',
+      'https://wabr.inliteresearch.com?types=DataMatrix&tbr=103',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_source: dataUrl,
-          types: 'DataMatrix',
-        }),
+        body: inliteForm,
       }
     );
 
-    if (!inliteResponse.ok) {
-      const text = await inliteResponse.text();
-      return NextResponse.json({ error: 'Inlite failed', detail: text }, { status: 500 });
+    const text = await inliteResponse.text();
+    console.log('Inlite raw response:', text);
+
+    let result: unknown;
+    try {
+      result = JSON.parse(text);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON from Inlite', raw: text }, { status: 500 });
     }
 
-    const result = await inliteResponse.json();
-    
-    // Log full result so we can see exactly what Inlite returns
-    console.log('Inlite full response:', JSON.stringify(result));
-
-    // Try multiple possible response shapes
-    const barcodes = result?.Barcodes || result?.barcodes || result?.data || [];
-    if (!barcodes.length) {
+    const barcodes = (result as { Barcodes?: unknown })?.Barcodes;
+    const list = Array.isArray(barcodes) ? barcodes : [];
+    if (!list.length) {
       return NextResponse.json({ error: 'No barcode found', raw: result }, { status: 404 });
     }
 
-    const text = barcodes[0]?.Text || barcodes[0]?.text || barcodes[0]?.Value || '';
-    return NextResponse.json({ text, raw: result });
-
+    const barcodeText = (list[0] as { Text?: unknown })?.Text;
+    const decoded = typeof barcodeText === 'string' ? barcodeText : '';
+    console.log('Decoded barcode text:', decoded);
+    return NextResponse.json({ text: decoded });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
