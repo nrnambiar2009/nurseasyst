@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getDefaultScanner, scanImageData } from "@undecaf/zbar-wasm";
+import { useCallback, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { parseGS1DataMatrix, type GS1Parsed } from "@/lib/gs1-parser";
 
 export interface BarcodeScannerProps {
@@ -10,181 +10,109 @@ export interface BarcodeScannerProps {
 }
 
 export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const scanTimerRef = useRef<number | null>(null);
-  const lastRawRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState<"idle" | "decoding" | "success" | "error">("idle");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [status, setStatus] = useState<"idle" | "requesting" | "scanning" | "denied" | "error">("idle");
-  const [torchOn, setTorchOn] = useState(false);
-  const [hasStream, setHasStream] = useState(false);
-
-  const stop = useCallback(() => {
-    if (scanTimerRef.current !== null) {
-      window.clearInterval(scanTimerRef.current);
-      scanTimerRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    lastRawRef.current = null;
-    setTorchOn(false);
-    setHasStream(false);
-    setStatus("idle");
+  const pickFile = useCallback(() => {
+    fileInputRef.current?.click();
   }, []);
 
-  const toggleTorch = useCallback(() => {
-    const stream = streamRef.current;
-    if (!stream) return;
-    const videoTrack = stream.getVideoTracks()[0];
-    if (!videoTrack || !("getCapabilities" in videoTrack)) return;
-    const caps = videoTrack.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
-    if (!caps.torch) return;
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      if (!file) return;
 
-    const next = !torchOn;
-    videoTrack
-      .applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] })
-      .then(() => setTorchOn(next))
-      .catch(() => {});
-  }, [torchOn]);
+      setErrorMessage(null);
+      setStatus("decoding");
 
-  useEffect(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
+      const url = URL.createObjectURL(file);
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
 
-    let cancelled = false;
-
-    setStatus("requesting");
-
-    (async () => {
       try {
-        await getDefaultScanner();
+        const form = new FormData();
+        form.append("image", file);
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: "environment",
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-          },
+        const res = await fetch("/api/scan", {
+          method: "POST",
+          body: form,
         });
 
-        if (cancelled) {
-          stream.getTracks().forEach((t) => t.stop());
+        if (!res.ok) {
+          setStatus("error");
+          setErrorMessage("Could not read barcode — please enter manually");
           return;
         }
 
-        streamRef.current = stream;
-        video.srcObject = stream;
-        await video.play();
-        setHasStream(true);
-        setStatus("scanning");
+        const data = (await res.json()) as { text?: unknown };
+        const raw = typeof data?.text === "string" ? data.text : "";
+        const parsed = raw ? parseGS1DataMatrix(raw) : null;
 
-        scanTimerRef.current = window.setInterval(async () => {
-          if (!videoRef.current || !canvasRef.current) return;
-          if (videoRef.current.readyState < 2) return;
-
-          const w = videoRef.current.videoWidth;
-          const h = videoRef.current.videoHeight;
-          if (!w || !h) return;
-
-          const c = canvasRef.current;
-          if (c.width !== w) c.width = w;
-          if (c.height !== h) c.height = h;
-          const ctx = c.getContext("2d", { willReadFrequently: true });
-          if (!ctx) return;
-
-          ctx.drawImage(videoRef.current, 0, 0, w, h);
-          const imageData = ctx.getImageData(0, 0, w, h);
-
-          let symbols: unknown[] = [];
-          try {
-            symbols = (await scanImageData(imageData)) as unknown[];
-          } catch {
-            return;
-          }
-
-          if (!symbols.length) return;
-          const symbol = symbols[0] as unknown;
-          if (!symbol || typeof symbol !== "object") return;
-
-          const decode = (symbol as { decode?: unknown }).decode;
-          if (typeof decode !== "function") return;
-
-          const raw = String((decode as () => unknown)());
-          if (!raw || raw === lastRawRef.current) return;
-          lastRawRef.current = raw;
-
-          const parsed = parseGS1DataMatrix(raw);
-          if (parsed && parsed.expiryDate) {
-            onResult(parsed);
-            stop();
-          }
-        }, 300);
-      } catch (err: unknown) {
-        const e = err as { name?: unknown; message?: unknown };
-        const name = typeof e?.name === "string" ? e.name : "";
-        const message = typeof e?.message === "string" ? e.message : "";
-        if (name === "NotAllowedError" || message.toLowerCase().includes("permission")) {
-          setStatus("denied");
-        } else {
+        if (!parsed) {
           setStatus("error");
+          setErrorMessage("Could not read barcode — please enter manually");
+          return;
         }
+
+        setStatus("success");
+        onResult(parsed);
+      } catch {
+        setStatus("error");
+        setErrorMessage("Could not read barcode — please enter manually");
       }
-    })();
+    },
+    [onResult]
+  );
 
-    return () => {
-      cancelled = true;
-      stop();
-    };
-  }, [onResult, stop]);
-
-  if (status === "denied") {
-    return (
-      <div className={`rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-800 ${className}`}>
-        <p className="font-medium">Camera access denied</p>
-        <p className="mt-1 text-sm">Allow camera access in your browser to scan barcodes.</p>
-      </div>
-    );
-  }
-
-  if (status === "error") {
-    return (
-      <div className={`rounded-xl border border-red-200 bg-red-50 p-6 text-red-800 ${className}`}>
-        <p className="font-medium">Could not start camera</p>
-        <p className="mt-1 text-sm">Check that a camera is available and try again.</p>
-      </div>
-    );
-  }
+  const showDecoding = useMemo(() => status === "decoding", [status]);
 
   return (
     <>
-      <div className={`relative overflow-hidden rounded-xl bg-black ${className}`}>
-        <video
-          ref={videoRef}
-          muted
-          playsInline
-          autoPlay
-          className="h-full w-full object-cover"
-          style={{ transform: "scaleX(-1)" }}
+      <div className={`relative overflow-hidden rounded-xl bg-slate-100 ${className}`}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileChange}
+          className="hidden"
         />
-        <canvas ref={canvasRef} style={{ display: "none" }} />
-        {status === "scanning" && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-            <span className="rounded-full bg-black/70 px-4 py-2 text-sm font-medium text-white">Scanning...</span>
+
+        <button
+          type="button"
+          onClick={pickFile}
+          className="flex w-full items-center justify-center rounded-xl bg-slate-800 px-4 py-6 text-base font-semibold text-white hover:bg-slate-700"
+        >
+          Take photo of barcode
+        </button>
+
+        {previewUrl && (
+          <div className="mt-3 overflow-hidden rounded-xl bg-black">
+            <Image
+              src={previewUrl}
+              alt="Barcode photo preview"
+              width={1200}
+              height={900}
+              className="h-auto w-full object-contain"
+              unoptimized
+            />
           </div>
         )}
-        {hasStream && (
-          <button
-            type="button"
-            onClick={toggleTorch}
-            className="absolute bottom-4 right-4 rounded-lg bg-white/90 px-3 py-2 text-sm font-medium text-black shadow hover:bg-white"
-            aria-label={torchOn ? "Turn off flash" : "Turn on flash"}
-          >
-            {torchOn ? "Flash on" : "Flash off"}
-          </button>
+
+        {showDecoding && (
+          <div className="mt-3 flex items-center justify-center rounded-xl bg-black/70 px-4 py-3 text-sm font-medium text-white">
+            Decoding...
+          </div>
+        )}
+
+        {status === "error" && errorMessage && (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {errorMessage}
+          </div>
         )}
       </div>
     </>
