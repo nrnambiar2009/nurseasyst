@@ -1,47 +1,49 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function POST(req: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const formData = await req.formData();
-    const image = formData.get("image");
+    const formData = await request.formData();
+    const file = formData.get('image') as File;
+    if (!file) return NextResponse.json({ error: 'No image' }, { status: 400 });
 
-    if (!(image instanceof File)) {
-      return NextResponse.json({ error: "Missing image file" }, { status: 400 });
+    const bytes = await file.arrayBuffer();
+    const base64 = Buffer.from(bytes).toString('base64');
+    const mimeType = file.type || 'image/jpeg';
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+
+    const inliteResponse = await fetch(
+      'https://wabr.inliteresearch.com/barcode-reader/api/decode',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_source: dataUrl,
+          types: 'DataMatrix',
+        }),
+      }
+    );
+
+    if (!inliteResponse.ok) {
+      const text = await inliteResponse.text();
+      return NextResponse.json({ error: 'Inlite failed', detail: text }, { status: 500 });
     }
 
-    const arrayBuffer = await image.arrayBuffer();
-    const base64string = Buffer.from(arrayBuffer).toString("base64");
+    const result = await inliteResponse.json();
+    
+    // Log full result so we can see exactly what Inlite returns
+    console.log('Inlite full response:', JSON.stringify(result));
 
-    const inliteRes = await fetch("https://wabr.inliteresearch.com", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        image_source: "base64:" + base64string,
-        types: "DataMatrix",
-        authorization: "",
-      }),
-    });
-
-    if (!inliteRes.ok) {
-      const text = await inliteRes.text().catch(() => "");
-      return NextResponse.json(
-        { error: "Inlite request failed", details: text },
-        { status: 502 }
-      );
+    // Try multiple possible response shapes
+    const barcodes = result?.Barcodes || result?.barcodes || result?.data || [];
+    if (!barcodes.length) {
+      return NextResponse.json({ error: 'No barcode found', raw: result }, { status: 404 });
     }
 
-    const data = (await inliteRes.json()) as { Text?: unknown };
-    const decodedText = typeof data?.Text === "string" ? data.Text : "";
+    const text = barcodes[0]?.Text || barcodes[0]?.text || barcodes[0]?.Value || '';
+    return NextResponse.json({ text, raw: result });
 
-    if (!decodedText) {
-      return NextResponse.json({ error: "No barcode text decoded" }, { status: 422 });
-    }
-
-    return NextResponse.json({ text: decodedText });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: "Unexpected error", details: msg }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

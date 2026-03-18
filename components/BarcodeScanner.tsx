@@ -42,19 +42,30 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
           body: form,
         });
 
+        const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        console.log("/api/scan response:", payload);
+
         if (!res.ok) {
           setStatus("error");
-          setErrorMessage("Could not read barcode — please enter manually");
+          const msg = typeof payload?.error === "string" ? payload.error : "Could not read barcode — please enter manually";
+          const detail = typeof payload?.detail === "string" ? payload.detail : "";
+          const details = detail ? `${msg}: ${detail}` : msg;
+          setErrorMessage(details);
           return;
         }
 
-        const data = (await res.json()) as { text?: unknown };
-        const raw = typeof data?.text === "string" ? data.text : "";
+        const raw = typeof payload?.text === "string" ? payload.text : "";
+        if (!raw) {
+          setStatus("error");
+          const msg = typeof payload?.error === "string" ? payload.error : "Could not read barcode — please enter manually";
+          setErrorMessage(msg);
+          return;
+        }
         const parsed = raw ? parseGS1DataMatrix(raw) : null;
 
         if (!parsed) {
           setStatus("error");
-          setErrorMessage("Could not read barcode — please enter manually");
+          setErrorMessage("Could not parse barcode — please enter manually");
           return;
         }
 
