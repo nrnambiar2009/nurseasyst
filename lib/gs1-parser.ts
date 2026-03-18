@@ -75,7 +75,9 @@ function parseAI10(str: string): { value: string; rest: string } | null {
  * Handles both standard GS1 and FNC1 separator variants.
  */
 export function parseGS1DataMatrix(raw: string): GS1Parsed | null {
-  const str = normalize(raw);
+  const normalized = normalize(raw);
+  const truncatedIndex = normalized.indexOf("...");
+  const str = truncatedIndex >= 0 ? normalized.slice(0, truncatedIndex).trim() : normalized;
   if (!str.length) return null;
 
   let gtin = "";
@@ -103,8 +105,8 @@ export function parseGS1DataMatrix(raw: string): GS1Parsed | null {
     lotNumber = r10.value;
   }
 
-  // Require at least GTIN for a valid parse
-  if (!gtin) return null;
+  // Allow partial parses from truncated strings; only fail if we got nothing useful.
+  if (!gtin && !expiryDate) return null;
 
   return {
     gtin,
