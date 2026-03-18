@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BarcodeReader } from "dynamsoft-barcode-reader";
+import { BarcodeReader } from "dynamsoft-barcode-reader-bundle";
 import { parseGS1DataMatrix, type GS1Parsed } from "@/lib/gs1-parser";
 
 export interface BarcodeScannerProps {
