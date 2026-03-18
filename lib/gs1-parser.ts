@@ -10,6 +10,7 @@ export interface GS1Parsed {
   gtin: string;
   expiryDate: string;
   lotNumber: string;
+  productName?: string;
 }
 
 /**
@@ -46,7 +47,6 @@ function parseAI10(str: string): { value: string; rest: string } | null {
   if (!str.startsWith("10")) return null;
   const after = str.slice(2);
   // Variable-length: consume until we hit FNC1 or a valid 2-digit AI (01, 17, 10, etc.)
-  const fnc1Index = after.indexOf(FNC1);
   const reNextAI = /^\d{2}/;
   let end = after.length;
   for (let i = 0; i < after.length; i++) {

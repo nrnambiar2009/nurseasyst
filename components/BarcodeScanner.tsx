@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { BarcodeReader } from "dynamsoft-barcode-reader-bundle";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getDefaultScanner, scanImageData } from "@undecaf/zbar-wasm";
 import { parseGS1DataMatrix, type GS1Parsed } from "@/lib/gs1-parser";
 
 export interface BarcodeScannerProps {
@@ -11,19 +11,24 @@ export interface BarcodeScannerProps {
 
 export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanTimerRef = useRef<number | null>(null);
+  const lastRawRef = useRef<string | null>(null);
+
   const [status, setStatus] = useState<"idle" | "requesting" | "scanning" | "denied" | "error">("idle");
   const [torchOn, setTorchOn] = useState(false);
   const [hasStream, setHasStream] = useState(false);
-  const [debugLog, setDebugLog] = useState<string[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const lastResultRef = useRef<string | null>(null);
-  const scanTimerRef = useRef<number | null>(null);
 
-  const log = useCallback((msg: string) => {
-    setDebugLog((prev) => [...prev.slice(-4), msg]);
-  }, []);
+  const [manualProductName, setManualProductName] = useState("");
+  const [manualLotNumber, setManualLotNumber] = useState("");
+  const [manualExpiryDate, setManualExpiryDate] = useState("");
 
-  const stopScanning = useCallback(() => {
+  const canSubmitManual = useMemo(() => {
+    return manualProductName.trim().length > 0 && manualLotNumber.trim().length > 0 && manualExpiryDate.trim().length > 0;
+  }, [manualExpiryDate, manualLotNumber, manualProductName]);
+
+  const stop = useCallback(() => {
     if (scanTimerRef.current !== null) {
       window.clearInterval(scanTimerRef.current);
       scanTimerRef.current = null;
@@ -32,6 +37,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    lastRawRef.current = null;
     setTorchOn(false);
     setHasStream(false);
     setStatus("idle");
@@ -44,6 +50,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
     if (!videoTrack || !("getCapabilities" in videoTrack)) return;
     const caps = videoTrack.getCapabilities() as MediaTrackCapabilities & { torch?: boolean };
     if (!caps.torch) return;
+
     const next = !torchOn;
     videoTrack
       .applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] })
@@ -52,68 +59,83 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
   }, [torchOn]);
 
   useEffect(() => {
-    log("Scanner mounted");
-
     const video = videoRef.current;
-    if (!video) return;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    let cancelled = false;
 
     setStatus("requesting");
 
     (async () => {
       try {
+        await getDefaultScanner();
+
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            facingMode: { ideal: "environment" },
+            facingMode: "environment",
             width: { ideal: 1920 },
             height: { ideal: 1080 },
           },
         });
+
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+
         streamRef.current = stream;
         video.srcObject = stream;
         await video.play();
-        log("Camera started");
         setHasStream(true);
         setStatus("scanning");
 
-        log("Initializing Dynamsoft reader...");
-        const reader = await BarcodeReader.createInstance();
-        await reader.updateRuntimeSettings("speed");
-        const settings = await reader.getRuntimeSettings();
-        settings.barcodeFormatIds = 0x8000000; // DataMatrix only
-        settings.barcodeFormatIds2 = 0;
-        await reader.updateRuntimeSettings(settings);
-        log("Dynamsoft reader ready");
+        scanTimerRef.current = window.setInterval(async () => {
+          if (!videoRef.current || !canvasRef.current) return;
+          if (videoRef.current.readyState < 2) return;
 
-        const scan = async () => {
-          log("Scanning frame...");
-          if (!videoRef.current) return;
+          const w = videoRef.current.videoWidth;
+          const h = videoRef.current.videoHeight;
+          if (!w || !h) return;
+
+          const c = canvasRef.current;
+          if (c.width !== w) c.width = w;
+          if (c.height !== h) c.height = h;
+          const ctx = c.getContext("2d", { willReadFrequently: true });
+          if (!ctx) return;
+
+          ctx.drawImage(videoRef.current, 0, 0, w, h);
+          const imageData = ctx.getImageData(0, 0, w, h);
+
+          let symbols: unknown[] = [];
           try {
-            const results = await reader.decode(videoRef.current);
-            log(`Results: ${results.length}`);
-            for (const result of results) {
-              const text = result.barcodeText;
-              if (!text) continue;
-              log(`Found: ${text.substring(0, 20)}`);
-              if (text && text !== lastResultRef.current) {
-                lastResultRef.current = text;
-                const parsed = parseGS1DataMatrix(text);
-                if (parsed) {
-                  onResult(parsed);
-                  lastResultRef.current = null;
-                  break;
-                }
-              }
-            }
-          } catch (err: any) {
-            log(`Scan error: ${err?.message || String(err)}`);
+            symbols = (await scanImageData(imageData)) as unknown[];
+          } catch {
+            return;
           }
-        };
 
-        scanTimerRef.current = window.setInterval(scan, 500);
-      } catch (err: any) {
-        log(`Dynamsoft / camera ERROR: ${err?.message || String(err)}`);
-        const e = err as Error;
-        if (e.name === "NotAllowedError" || e.message?.toLowerCase().includes("permission")) {
+          if (!symbols.length) return;
+          const symbol = symbols[0] as unknown;
+          if (!symbol || typeof symbol !== "object") return;
+
+          const decode = (symbol as { decode?: unknown }).decode;
+          if (typeof decode !== "function") return;
+
+          const raw = String((decode as () => unknown)());
+          if (!raw || raw === lastRawRef.current) return;
+          lastRawRef.current = raw;
+
+          const parsed = parseGS1DataMatrix(raw);
+          if (parsed && parsed.expiryDate) {
+            onResult(parsed);
+            stop();
+          }
+        }, 300);
+      } catch (err: unknown) {
+        const e = err as { name?: unknown; message?: unknown };
+        const name = typeof e?.name === "string" ? e.name : "";
+        const message = typeof e?.message === "string" ? e.message : "";
+        if (name === "NotAllowedError" || message.toLowerCase().includes("permission")) {
           setStatus("denied");
         } else {
           setStatus("error");
@@ -122,9 +144,21 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
     })();
 
     return () => {
-      stopScanning();
+      cancelled = true;
+      stop();
     };
-  }, [onResult, stopScanning]);
+  }, [onResult, stop]);
+
+  const submitManual = useCallback(() => {
+    if (!canSubmitManual) return;
+    onResult({
+      gtin: "",
+      lotNumber: manualLotNumber.trim(),
+      expiryDate: manualExpiryDate.trim(),
+      productName: manualProductName.trim(),
+    });
+    stop();
+  }, [canSubmitManual, manualExpiryDate, manualLotNumber, manualProductName, onResult, stop]);
 
   if (status === "denied") {
     return (
@@ -152,16 +186,13 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
           muted
           playsInline
           autoPlay
-          crossOrigin="anonymous"
           className="h-full w-full object-cover"
           style={{ transform: "scaleX(-1)" }}
         />
         <canvas ref={canvasRef} style={{ display: "none" }} />
-        {(status === "requesting" || status === "scanning") && (
+        {status === "scanning" && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-            <span className="rounded-full bg-black/70 px-4 py-2 text-sm font-medium text-white">
-              {status === "requesting" ? "Starting camera…" : "Scanning…"}
-            </span>
+            <span className="rounded-full bg-black/70 px-4 py-2 text-sm font-medium text-white">Scanning...</span>
           </div>
         )}
         {hasStream && (
@@ -175,20 +206,47 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
           </button>
         )}
       </div>
-      <div
-        style={{
-          background: "#000",
-          color: "#0f0",
-          padding: "8px",
-          fontSize: "11px",
-          fontFamily: "monospace",
-          borderRadius: "8px",
-          marginTop: "8px",
-        }}
-      >
-        {debugLog.map((line, i) => (
-          <div key={i}>{line}</div>
-        ))}
+
+      <div className="mt-4 space-y-3 rounded-xl bg-white p-4 shadow-sm">
+        <p className="text-sm font-medium text-slate-800">Manual entry</p>
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Product name</span>
+          <input
+            type="text"
+            value={manualProductName}
+            onChange={(e) => setManualProductName(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+            placeholder="Enter product name"
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Lot number</span>
+          <input
+            type="text"
+            value={manualLotNumber}
+            onChange={(e) => setManualLotNumber(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+            placeholder="Enter lot number"
+          />
+        </label>
+        <label className="block">
+          <span className="text-sm font-medium text-slate-700">Expiry date (YYMMDD)</span>
+          <input
+            type="text"
+            value={manualExpiryDate}
+            onChange={(e) => setManualExpiryDate(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
+            placeholder="260831"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={submitManual}
+          disabled={!canSubmitManual}
+          className="w-full rounded-xl bg-slate-800 py-3 font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+        >
+          Save
+        </button>
       </div>
     </>
   );

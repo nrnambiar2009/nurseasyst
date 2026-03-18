@@ -53,7 +53,7 @@ export default function NewDeliveryPage() {
 
   const handleScanResult = useCallback((parsed: GS1Parsed) => {
     setGtin(parsed.gtin);
-    const name = lookupProductName(parsed.gtin);
+    const name = parsed.productName || lookupProductName(parsed.gtin);
     setProductName(name);
     setLotNumber(parsed.lotNumber || "");
     setExpiryDate(parsed.expiryDate || "");
