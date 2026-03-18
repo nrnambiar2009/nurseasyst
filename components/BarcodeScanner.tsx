@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getDefaultScanner, scanImageData } from "@undecaf/zbar-wasm";
 import { parseGS1DataMatrix, type GS1Parsed } from "@/lib/gs1-parser";
 
@@ -19,14 +19,6 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
   const [status, setStatus] = useState<"idle" | "requesting" | "scanning" | "denied" | "error">("idle");
   const [torchOn, setTorchOn] = useState(false);
   const [hasStream, setHasStream] = useState(false);
-
-  const [manualProductName, setManualProductName] = useState("");
-  const [manualLotNumber, setManualLotNumber] = useState("");
-  const [manualExpiryDate, setManualExpiryDate] = useState("");
-
-  const canSubmitManual = useMemo(() => {
-    return manualProductName.trim().length > 0 && manualLotNumber.trim().length > 0 && manualExpiryDate.trim().length > 0;
-  }, [manualExpiryDate, manualLotNumber, manualProductName]);
 
   const stop = useCallback(() => {
     if (scanTimerRef.current !== null) {
@@ -149,17 +141,6 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
     };
   }, [onResult, stop]);
 
-  const submitManual = useCallback(() => {
-    if (!canSubmitManual) return;
-    onResult({
-      gtin: "",
-      lotNumber: manualLotNumber.trim(),
-      expiryDate: manualExpiryDate.trim(),
-      productName: manualProductName.trim(),
-    });
-    stop();
-  }, [canSubmitManual, manualExpiryDate, manualLotNumber, manualProductName, onResult, stop]);
-
   if (status === "denied") {
     return (
       <div className={`rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-800 ${className}`}>
@@ -205,48 +186,6 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
             {torchOn ? "Flash on" : "Flash off"}
           </button>
         )}
-      </div>
-
-      <div className="mt-4 space-y-3 rounded-xl bg-white p-4 shadow-sm">
-        <p className="text-sm font-medium text-slate-800">Manual entry</p>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Product name</span>
-          <input
-            type="text"
-            value={manualProductName}
-            onChange={(e) => setManualProductName(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
-            placeholder="Enter product name"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Lot number</span>
-          <input
-            type="text"
-            value={manualLotNumber}
-            onChange={(e) => setManualLotNumber(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
-            placeholder="Enter lot number"
-          />
-        </label>
-        <label className="block">
-          <span className="text-sm font-medium text-slate-700">Expiry date (YYMMDD)</span>
-          <input
-            type="text"
-            value={manualExpiryDate}
-            onChange={(e) => setManualExpiryDate(e.target.value)}
-            className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-slate-900"
-            placeholder="260831"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={submitManual}
-          disabled={!canSubmitManual}
-          className="w-full rounded-xl bg-slate-800 py-3 font-medium text-white hover:bg-slate-700 disabled:opacity-50"
-        >
-          Save
-        </button>
       </div>
     </>
   );
