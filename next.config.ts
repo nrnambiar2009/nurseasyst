@@ -8,10 +8,7 @@ const nextConfig: NextConfig = {
     };
 
     if (!isServer) {
-      config.resolve.alias = {
-        ...config.resolve.alias,
-        'rxing-wasm': require.resolve('rxing-wasm/rxing_wasm.js'),
-      };
+      config.resolve.conditionNames = ['browser', 'import', 'module', 'require', 'default'];
     }
 
     return config;
