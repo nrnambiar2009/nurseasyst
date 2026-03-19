@@ -34,34 +34,13 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
       });
 
       try {
-        const form = new FormData();
-        form.append("image", file);
+        // Decode client-side using rxing-wasm — no API call needed
+        const { decodeBarcodeFromFile } = await import("@/lib/decode-barcode");
+        const raw = await decodeBarcodeFromFile(file);
 
-        const res = await fetch("/api/scan", {
-          method: "POST",
-          body: form,
-        });
+        console.log("rxing decoded:", raw);
 
-        const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-        console.log("/api/scan response:", payload);
-
-        if (!res.ok) {
-          setStatus("error");
-          const msg = typeof payload?.error === "string" ? payload.error : "Could not read barcode — please enter manually";
-          const detail = typeof payload?.detail === "string" ? payload.detail : "";
-          const details = detail ? `${msg}: ${detail}` : msg;
-          setErrorMessage(details);
-          return;
-        }
-
-        const raw = typeof payload?.text === "string" ? payload.text : "";
-        if (!raw) {
-          setStatus("error");
-          const msg = typeof payload?.error === "string" ? payload.error : "Could not read barcode — please enter manually";
-          setErrorMessage(msg);
-          return;
-        }
-        const parsed = raw ? parseGS1DataMatrix(raw) : null;
+        const parsed = parseGS1DataMatrix(raw);
 
         if (!parsed) {
           setStatus("error");
@@ -71,9 +50,10 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
 
         setStatus("success");
         onResult(parsed);
-      } catch {
+      } catch (err) {
         setStatus("error");
-        setErrorMessage("Could not read barcode — please enter manually");
+        const msg = err instanceof Error ? err.message : "Could not read barcode — please enter manually";
+        setErrorMessage(msg);
       }
     },
     [onResult]
