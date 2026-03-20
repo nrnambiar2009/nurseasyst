@@ -6,37 +6,29 @@ export async function POST(request: NextRequest) {
     const file = formData.get('image') as File;
     if (!file) return NextResponse.json({ error: 'No image' }, { status: 400 });
 
-    const inliteForm = new FormData();
-    inliteForm.append('file[]', file, file.name || 'scan.jpg');
-    inliteForm.append('types', 'DataMatrix');
-    inliteForm.append('tbr', '103');
+    // Forward to ZXing public decoder
+    const zxingForm = new FormData();
+    zxingForm.append('f', file, file.name || 'scan.jpg');
 
-    const inliteResponse = await fetch(
-      'https://wabr.inliteresearch.com/barcodes/file',
-      {
-        method: 'POST',
-        body: inliteForm,
-      }
+    const zxingResponse = await fetch(
+      'https://zxing.org/w/decode',
+      { method: 'POST', body: zxingForm }
     );
 
-    const text = await inliteResponse.text();
-    console.log('Inlite raw response:', text);
+    const html = await zxingResponse.text();
 
-    let result;
-    try {
-      result = JSON.parse(text);
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON', raw: text }, { status: 500 });
+    // ZXing returns HTML — extract the decoded text from the <pre> tag
+    const match = html.match(/<pre>([^<]+)<\/pre>/);
+    if (!match || !match[1]) {
+      // Log the raw HTML so we can debug if it fails
+      console.log('ZXing raw response:', html.substring(0, 500));
+      return NextResponse.json({ error: 'No barcode found', raw: html.substring(0, 500) }, { status: 404 });
     }
 
-    const barcodes = result?.Barcodes || [];
-    if (!barcodes.length) {
-      return NextResponse.json({ error: 'No barcode found', raw: result }, { status: 404 });
-    }
-
-    const barcodeText = barcodes[0]?.Text || '';
-    console.log('Decoded text:', barcodeText);
+    const barcodeText = match[1].trim();
+    console.log('ZXing decoded:', barcodeText);
     return NextResponse.json({ text: barcodeText });
+
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
