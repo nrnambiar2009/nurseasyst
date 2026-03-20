@@ -44,6 +44,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
 
         const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
         console.log("/api/scan response:", payload);
+        console.log("parsed result:", parseGS1DataMatrix(typeof payload?.text === "string" ? payload.text : ""));
 
         if (!res.ok) {
           setStatus("error");
