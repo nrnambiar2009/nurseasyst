@@ -65,12 +65,17 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
 
         const parsed = parseGS1DataMatrix(raw);
 
+        // After: const parsed = parseGS1DataMatrix(raw);
+        // Replace the null check with:
+
         if (!parsed) {
           setStatus("error");
           setErrorMessage("Could not parse barcode — please enter manually");
           return;
         }
 
+        // If we only got GTIN (1D barcode), still pass it through —
+        // the form will populate product name and leave expiry/lot blank for manual entry
         setStatus("success");
         onResult(parsed);
       } catch {
