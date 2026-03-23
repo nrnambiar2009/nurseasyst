@@ -86,6 +86,10 @@ export function parseGS1DataMatrix(raw: string): GS1Parsed | null {
   const expiryDate = r17?.value ?? "";
   const lotNumber = r10?.value ?? "";
 
+  if (/^\d{6}$/.test(str)) {
+    return { gtin: "", expiryDate: str, lotNumber: "" };
+  }
+
   if (!gtin && !expiryDate) return null;
   return { gtin, expiryDate, lotNumber };
 }
