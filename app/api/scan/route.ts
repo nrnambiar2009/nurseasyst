@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-const scannerUrl = process.env.SCANNER_URL || "https://nurseasyst-scanner.onrender.com";
 
 export async function POST(request: NextRequest) {
   try {
@@ -7,28 +6,23 @@ export async function POST(request: NextRequest) {
     const file = formData.get('image') as File;
     if (!file) return NextResponse.json({ error: 'No image' }, { status: 400 });
 
-    // Forward to ZXing public decoder
+    const scannerUrl = process.env.SCANNER_URL || 'https://nurseasyst-scanner.onrender.com';
+
     const form = new FormData();
-    form.append("file", file, file.name || "scan.jpg");
+    form.append('image', file, file.name || 'scan.jpg');
 
     const response = await fetch(`${scannerUrl}/scan`, {
-      method: "POST",
+      method: 'POST',
       body: form,
     });
 
-    const html = await response.text();
+    const data = await response.json();
 
-    // ZXing returns HTML — extract the decoded text from the <pre> tag
-    const match = html.match(/<pre>([^<]+)<\/pre>/);
-    if (!match || !match[1]) {
-      // Log the raw HTML so we can debug if it fails
-      console.log('ZXing raw response:', html.substring(0, 500));
-      return NextResponse.json({ error: 'No barcode found', raw: html.substring(0, 500) }, { status: 404 });
+    if (!response.ok) {
+      return NextResponse.json({ error: data.error || 'No barcode found' }, { status: 404 });
     }
 
-    const barcodeText = match[1].trim();
-    console.log('ZXing decoded:', barcodeText);
-    return NextResponse.json({ text: barcodeText });
+    return NextResponse.json({ text: data.text });
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
