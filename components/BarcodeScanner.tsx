@@ -114,7 +114,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
           console.error("Failed to fetch product name:", err);
         }
       }
-    } catch (error) {
+    } catch {
       setStatus("error");
       setErrorMessage("Could not read barcode — please enter manually");
     }
