@@ -1,14 +1,5 @@
+import { NextRequest, NextResponse } from 'next/server';
 const scannerUrl = process.env.SCANNER_URL || "https://nurseasyst-scanner.onrender.com";
-
-const form = new FormData();
-form.append("file", file, file.name || "scan.jpg");
-
-const response = await fetch(`${scannerUrl}/scan`, {
-  method: "POST",
-  body: form,
-});
-
-/*import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,15 +8,15 @@ export async function POST(request: NextRequest) {
     if (!file) return NextResponse.json({ error: 'No image' }, { status: 400 });
 
     // Forward to ZXing public decoder
-    const zxingForm = new FormData();
-    zxingForm.append('f', file, file.name || 'scan.jpg');
+    const form = new FormData();
+    form.append("file", file, file.name || "scan.jpg");
 
-    const zxingResponse = await fetch(
-      'https://zxing.org/w/decode',
-      { method: 'POST', body: zxingForm }
-    );
+    const response = await fetch(`${scannerUrl}/scan`, {
+      method: "POST",
+      body: form,
+    });
 
-    const html = await zxingResponse.text();
+    const html = await response.text();
 
     // ZXing returns HTML — extract the decoded text from the <pre> tag
     const match = html.match(/<pre>([^<]+)<\/pre>/);
@@ -43,4 +34,4 @@ export async function POST(request: NextRequest) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
-}*/
+}
