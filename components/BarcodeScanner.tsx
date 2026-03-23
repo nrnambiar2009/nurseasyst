@@ -49,76 +49,78 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
   }, []);
 
   const handleFileChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0] || null;
-      if (!file) return;
+  async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    if (!file) return;
 
-      setErrorMessage(null);
-      setStatus("decoding");
+    setErrorMessage(null);
+    setStatus("decoding");
 
-      const url = URL.createObjectURL(file);
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return url;
+    const url = URL.createObjectURL(file);
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return url;
+    });
+
+    try {
+      const processed = await preprocessImage(file);
+      const processedFile = new File([processed], "scan.jpg", { type: "image/jpeg" });
+
+      const form = new FormData();
+      form.append("image", processedFile);
+
+      const res = await fetch("/api/scan", {
+        method: "POST",
+        body: form,
       });
 
-      try {
-        // Pre-process image before sending
-        const processed = await preprocessImage(file);
-        const processedFile = new File([processed], "scan.jpg", { type: "image/jpeg" });
+      const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
 
-        const form = new FormData();
-        form.append("image", processedFile);
-
-        const res = await fetch("/api/scan", {
-          method: "POST",
-          body: form,
-        });
-
-        const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-        console.log("/api/scan response:", payload);
-
-        if (!res.ok) {
-          setStatus("error");
-          setErrorMessage("Could not read barcode — try again with better lighting");
-          return;
-        }
-
-        const raw = typeof payload?.text === "string" ? payload.text : "";
-        if (!raw) {
-          setStatus("error");
-          setErrorMessage("Could not read barcode — try again with better lighting");
-          return;
-        }
-
-        const parsed = parseGS1DataMatrix(raw);
-        console.log("parsed result:", parsed);
-
-        if (!parsed) {
-          setStatus("error");
-          setErrorMessage("Could not parse barcode — please enter manually");
-          return;
-        }
-
-        setStatus("success");
-        onResult(parsed);
-        if (parsed.gtin) {
-          fetch(`/api/scan?gtin=${parsed.gtin}`)
-            .then(r => r.json())
-            .then(data => {
-              if (data.productName) {
-                onResult({ ...parsed, productName: data.productName });
-              }
-            })
-            .catch(() => {});
-        }
-      } catch {
+      if (!res.ok || !payload?.text) {
         setStatus("error");
-        setErrorMessage("Could not read barcode — please enter manually");
+        setErrorMessage("Could not read barcode — try again with better lighting");
+        return;
       }
-    },
-    [onResult]
-  );
+
+      const parsed = parseGS1DataMatrix(payload.text as string);
+
+      if (!parsed) {
+        setStatus("error");
+        setErrorMessage("Could not parse barcode — please enter manually");
+        return;
+      }
+
+      // 1. Log the initial scan data
+      console.log("Initial GS1 Scan:", parsed);
+
+      setStatus("success");
+      onResult(parsed);
+
+      // 2. If there is a GTIN, fetch the product name and log the full result
+      if (parsed.gtin) {
+        try {
+          const productRes = await fetch(`/api/scan?gtin=${parsed.gtin}`);
+          const productData = await productRes.json();
+          
+          if (productData.productName) {
+            const enrichedResult = { ...parsed, productName: productData.productName };
+            
+            // This is what you're looking for:
+            console.log("Enriched GS1 Result (with Product Name):", enrichedResult);
+            
+            onResult(enrichedResult);
+          }
+        } catch (err) {
+          console.error("Failed to fetch product name:", err);
+        }
+      }
+    } catch (error) {
+      setStatus("error");
+      setErrorMessage("Could not read barcode — please enter manually");
+    }
+  },
+  [onResult]
+);
 
   const showDecoding = useMemo(() => status === "decoding", [status]);
 
