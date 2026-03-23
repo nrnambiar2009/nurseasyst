@@ -102,6 +102,16 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
 
         setStatus("success");
         onResult(parsed);
+        if (parsed.gtin) {
+          fetch(`/api/scan?gtin=${parsed.gtin}`)
+            .then(r => r.json())
+            .then(data => {
+              if (data.productName) {
+                onResult({ ...parsed, productName: data.productName });
+              }
+            })
+            .catch(() => {});
+        }
       } catch {
         setStatus("error");
         setErrorMessage("Could not read barcode — please enter manually");

@@ -29,3 +29,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export async function GET(request: NextRequest) {
+  try {
+    const gtin = request.nextUrl.searchParams.get('gtin') || '';
+    if (!gtin) return NextResponse.json({ productName: null }, { status: 400 });
+
+    const scannerUrl = process.env.SCANNER_URL || 'https://nurseasyst-scanner.onrender.com';
+
+    const response = await fetch(`${scannerUrl}/lookup?gtin=${gtin}`);
+    const data = await response.json();
+
+    return NextResponse.json({ productName: data.productName || null });
+
+  } catch {
+    return NextResponse.json({ productName: null }, { status: 500 });
+  }
+}
