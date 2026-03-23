@@ -1,4 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
+const scannerUrl = process.env.SCANNER_URL || "https://nurseasyst-scanner.onrender.com";
+
+const form = new FormData();
+form.append("file", file, file.name || "scan.jpg");
+
+const response = await fetch(`${scannerUrl}/scan`, {
+  method: "POST",
+  body: form,
+});
+
+/*import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -33,4 +43,4 @@ export async function POST(request: NextRequest) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
   }
-}
+}*/
