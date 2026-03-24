@@ -132,6 +132,7 @@ export function BarcodeScanner({ onResult, className = "" }: BarcodeScannerProps
         accept="image/*"
         capture="environment"
         onChange={handleFileChange}
+        className="hidden"
       />
 
       {/* Scanning instructions */}
