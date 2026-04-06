@@ -1,10 +1,10 @@
 "use server";
 
-import { createServerSupabaseClient } from "@/lib/supabase-server";
+import { createClient } from "@/lib/supabase-server";
 import { redirect } from "next/navigation";
 
 export async function createSchool(formData: FormData) {
-  const supabase = await createServerSupabaseClient();
+   const supabase = await createClient();
 
   const {
     data: { user },
