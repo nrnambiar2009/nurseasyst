@@ -19,7 +19,7 @@ export default async function OnboardingPage({
     .from("schools")
     .select("id")
     .eq("user_id", user.id)
-    .maybeSingle();
+    .limit(1);
 
   if (existing) redirect("/");
 

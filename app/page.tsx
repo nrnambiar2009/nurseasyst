@@ -46,11 +46,13 @@ export default function Home() {
       }
 
       // 2. Look up their school
-      const { data: school, error: schoolError } = await supabase
+      const { data: schools, error: schoolError } = await supabase
         .from("schools")
         .select("id, school_name")
         .eq("user_id", user.id)
-        .maybeSingle();
+        .limit(1);
+
+      const school = schools?.[0] ?? null;
 
       if (schoolError) {
         setError(schoolError.message);
