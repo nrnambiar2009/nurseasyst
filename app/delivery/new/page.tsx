@@ -1,45 +1,35 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { createBrowserClient } from "@supabase/ssr";
 import { BarcodeScanner } from "@/components/BarcodeScanner";
 import type { GS1Parsed } from "@/lib/gs1-parser";
 import { lookupProductName } from "@/lib/product-lookup";
 import { formatExpiryDisplay } from "@/lib/types";
 import { expiryToISODate } from "@/lib/expiry-format";
-import { supabase } from "@/lib/supabase";
-
-const TEST_SCHOOL_ID = "00000000-0000-0000-0000-000000000001";
 
 function getProductType(productName: string): string {
   const name = productName.toLowerCase();
   if (name.includes("epinephrine") || name.includes("epipen") || name.includes("auvi") || name.includes("adrenalin"))
     return "epipen";
-  if (
-    name.includes("albuterol") ||
-    name.includes("salbutamol") ||
-    name.includes("proventil") ||
-    name.includes("ventolin")
-  )
+  if (name.includes("albuterol") || name.includes("salbutamol") || name.includes("proventil") || name.includes("ventolin"))
     return "albuterol";
   if (name.includes("naloxone") || name.includes("narcan") || name.includes("kloxxado") || name.includes("zimhi"))
     return "naloxone";
-  if (name.includes("glucagon") || name.includes("gvoke") || name.includes("baqsimi")) return "glucagon";
-  if (
-    name.includes("aed") ||
-    name.includes("defibrillator") ||
-    name.includes("electrode") ||
-    name.includes("pad")
-  )
+  if (name.includes("glucagon") || name.includes("gvoke") || name.includes("baqsimi"))
+    return "glucagon";
+  if (name.includes("aed") || name.includes("defibrillator") || name.includes("electrode") || name.includes("pad"))
     return "aed_pads";
-  return "albuterol"; // default fallback
+  return "albuterol";
 }
 
 type Screen = "form" | "success";
 
 export default function NewDeliveryPage() {
   const router = useRouter();
+  const [schoolId, setSchoolId] = useState<string | null>(null);
   const [screen, setScreen] = useState<Screen>("form");
   const [gtin, setGtin] = useState("");
   const [productName, setProductName] = useState("");
@@ -50,6 +40,31 @@ export default function NewDeliveryPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
+
+  // Resolve school_id for the logged-in user on mount
+  useEffect(() => {
+    async function resolveSchool() {
+      const supabase = createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { router.replace("/login"); return; }
+
+      const { data: schools } = await supabase
+        .from("schools")
+        .select("id")
+        .eq("user_id", user.id)
+        .limit(1);
+
+      const school = schools?.[0] ?? null;
+      if (!school) { router.replace("/onboarding"); return; }
+
+      setSchoolId(school.id);
+    }
+    resolveSchool();
+  }, [router]);
 
   const handleScanResult = useCallback((parsed: GS1Parsed) => {
     setGtin(parsed.gtin);
@@ -62,11 +77,18 @@ export default function NewDeliveryPage() {
   }, []);
 
   const handleSave = useCallback(async () => {
+    if (!schoolId) { setSaveError("School not loaded yet — try again."); return; }
     setSaving(true);
     setSaveError(null);
+
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
     const expiryISO = expiryToISODate(expiryDate);
     const { error } = await supabase.from("inventory_items").insert({
-      school_id: TEST_SCHOOL_ID,
+      school_id: schoolId,
       product_type: getProductType(productName),
       product_name: productName,
       gtin,
@@ -74,19 +96,19 @@ export default function NewDeliveryPage() {
       expiry_date: expiryISO,
       quantity: Math.max(1, quantity),
     });
+
     if (error) {
       setSaveError(error.message);
       setSaving(false);
       return;
     }
+
     setSuccessMessage(`Delivery saved. ${productName} expires ${formatExpiryDisplay(expiryDate)}.`);
     setScreen("success");
     setSaving(false);
-  }, [productName, lotNumber, expiryDate, quantity, gtin]);
+  }, [schoolId, productName, lotNumber, expiryDate, quantity, gtin]);
 
-  const goToBoard = useCallback(() => {
-    router.push("/");
-  }, [router]);
+  const goToBoard = useCallback(() => { router.push("/"); }, [router]);
 
   if (screen === "success") {
     return (
@@ -184,7 +206,7 @@ export default function NewDeliveryPage() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || !productName.trim()}
+            disabled={saving || !productName.trim() || !schoolId}
             className="w-full rounded-xl bg-slate-800 py-3 font-medium text-white hover:bg-slate-700 disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save delivery"}
